@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/services.dart' show rootBundle;
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 void main() {
   runApp(const FocusKitApp());
@@ -40,7 +42,9 @@ class FocusKitApp extends StatelessWidget {
               colorSchemeSeed: Colors.indigo,
               brightness: Brightness.dark,
             ),
-            home: const HomePage(),
+            home: app.supaReady && !app.isAuthenticated
+                ? const AuthPage()
+                : const HomePage(),
           );
         },
       ),
@@ -83,6 +87,11 @@ class _HomePageState extends State<HomePage> {
 }
 
 class AppState extends ChangeNotifier {
+  // Supabase
+  bool supaReady = false;
+  bool isAuthenticated = false;
+  String? userId;
+
   // Settings
   int focusMinutes = 25;
   int breakMinutes = 5;
@@ -123,6 +132,11 @@ class AppState extends ChangeNotifier {
       stats = map.map((k, v) => MapEntry(k, DayStat.fromJson(v as Map<String, dynamic>)));
     }
 
+    await _initSupabase();
+    await _refreshAuthState();
+    if (isAuthenticated) {
+      await loadFromSupabase();
+    }
     _startTicker();
     notifyListeners();
   }
@@ -137,6 +151,9 @@ class AppState extends ChangeNotifier {
     await prefs.setString('themeMode', themeMode);
     await prefs.setStringList('tasks', tasks.map((t) => jsonEncode(t.toJson())).toList());
     await prefs.setString('stats', jsonEncode(stats.map((k, v) => MapEntry(k, v.toJson()))));
+    if (isAuthenticated) {
+      await _upsertSettingsRemote();
+    }
   }
 
   void _startTicker() {
@@ -165,6 +182,131 @@ class AppState extends ChangeNotifier {
     );
   }
 
+  // Supabase init/auth
+  Future<void> _initSupabase() async {
+    try {
+      final content = await rootBundle.loadString('assets/env.json');
+      final env = jsonDecode(content) as Map<String, dynamic>;
+      final url = (env['supabaseUrl'] as String?)?.trim();
+      final anonKey = (env['supabaseAnonKey'] as String?)?.trim();
+      if (url == null || url.isEmpty || anonKey == null || anonKey.isEmpty) {
+        supaReady = false;
+        return;
+      }
+      await Supabase.initialize(url: url, anonKey: anonKey);
+      supaReady = true;
+    } catch (_) {
+      supaReady = false;
+    }
+  }
+
+  Future<void> _refreshAuthState() async {
+    if (!supaReady) { isAuthenticated = false; userId = null; return; }
+    final session = Supabase.instance.client.auth.currentSession;
+    isAuthenticated = session != null;
+    userId = session?.user.id;
+  }
+
+  Future<bool> signInWithPassword(String email, String password) async {
+    if (!supaReady) return false;
+    final res = await Supabase.instance.client.auth.signInWithPassword(email: email, password: password);
+    await _refreshAuthState();
+    if (isAuthenticated) {
+      await loadFromSupabase();
+    }
+    notifyListeners();
+    return res.session != null;
+  }
+
+  Future<void> signOut() async {
+    if (!supaReady) return;
+    await Supabase.instance.client.auth.signOut();
+    await _refreshAuthState();
+    notifyListeners();
+  }
+
+  // Remote mapping helpers
+  int _priorityToInt(String p) {
+    switch (p) {
+      case 'urgent': return 1;
+      case 'high': return 2;
+      case 'normal': return 3;
+      case 'low': return 4;
+    }
+    return 3;
+  }
+  String _intToPriority(int v) {
+    if (v == 1) return 'urgent';
+    if (v == 2) return 'high';
+    if (v == 4) return 'low';
+    return 'normal';
+  }
+
+  DateTime _dateStringToDueDate(String dateStr) {
+    // Store at noon UTC to avoid tz issues
+    final parts = dateStr.split('-').map(int.parse).toList();
+    return DateTime.utc(parts[0], parts[1], parts[2], 12, 0, 0);
+  }
+
+  String _dueDateToDateString(String? rfc3339) {
+    if (rfc3339 == null) return todayKey();
+    final dt = DateTime.parse(rfc3339).toUtc();
+    return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
+  }
+
+  // Sync operations
+  Future<void> loadFromSupabase() async {
+    if (!isAuthenticated) return;
+    final client = Supabase.instance.client;
+    // Settings
+    final settings = await client.from('user_settings').select().maybeSingle();
+    if (settings != null) {
+      focusMinutes = (settings['pomodoro_focus_minutes'] as num?)?.toInt() ?? focusMinutes;
+      breakMinutes = (settings['pomodoro_break_minutes'] as num?)?.toInt() ?? breakMinutes;
+      longBreakMinutes = (settings['long_break_minutes'] as num?)?.toInt() ?? longBreakMinutes;
+      sessionsBeforeLong = (settings['sessions_before_long'] as num?)?.toInt() ?? sessionsBeforeLong;
+    } else {
+      await _upsertSettingsRemote();
+    }
+    // Tasks for today
+    final today = DateTime.now().toUtc();
+    final start = DateTime.utc(today.year, today.month, today.day, 0, 0, 0).toIso8601String();
+    final end = DateTime.utc(today.year, today.month, today.day, 23, 59, 59).toIso8601String();
+    final rows = await client
+        .from('tasks')
+        .select()
+        .gte('due_date', start)
+        .lte('due_date', end)
+        .order('created_at');
+    final remoteTasks = (rows as List<dynamic>).cast<Map<String, dynamic>>();
+    tasks = remoteTasks
+        .map((r) => TaskItem(
+              id: r['id'] as String,
+              title: (r['title'] as String?) ?? '',
+              priority: _intToPriority((r['priority'] as num?)?.toInt() ?? 3),
+              done: ((r['status'] as String?) ?? 'todo') == 'done',
+              order: (r['updated_at'] != null ? DateTime.parse(r['updated_at']).millisecondsSinceEpoch : DateTime.now().millisecondsSinceEpoch),
+              createdAt: (r['created_at'] != null ? DateTime.parse(r['created_at']).millisecondsSinceEpoch : DateTime.now().millisecondsSinceEpoch),
+              date: _dueDateToDateString(r['due_date'] as String?),
+            ))
+        .toList();
+    await save();
+    notifyListeners();
+  }
+
+  Future<void> _upsertSettingsRemote() async {
+    if (!isAuthenticated) return;
+    final client = Supabase.instance.client;
+    await client.from('user_settings').upsert({
+      'user_id': userId,
+      'pomodoro_focus_minutes': focusMinutes,
+      'pomodoro_break_minutes': breakMinutes,
+      'long_break_minutes': longBreakMinutes,
+      'sessions_before_long': sessionsBeforeLong,
+      'updated_at': DateTime.now().toIso8601String(),
+    }, onConflict: 'user_id');
+  }
+
   Future<void> startFocus([int? minutes]) async {
     final m = minutes ?? focusMinutes;
     currentMode = 'focus';
@@ -179,6 +321,18 @@ class AppState extends ChangeNotifier {
     if (currentMode == 'focus' && sessionStart != null) {
       final seconds = DateTime.now().difference(sessionStart!).inSeconds;
       _addStat(sessions: 1, focusSeconds: seconds);
+      // Remote session record
+      if (isAuthenticated) {
+        final client = Supabase.instance.client;
+        await client.from('focus_sessions').insert({
+          'user_id': userId,
+          'session_type': 'pomodoro',
+          'started_at': sessionStart!.toUtc().toIso8601String(),
+          'ended_at': DateTime.now().toUtc().toIso8601String(),
+          'duration_seconds': seconds,
+          'completed': false,
+        });
+      }
       if (reason != null && reason.isNotEmpty) {
         final key = todayKey();
         final day = stats[key] ?? DayStat(sessions: 0, focusSeconds: 0, tasksDone: 0);
@@ -219,6 +373,17 @@ class AppState extends ChangeNotifier {
     if (currentMode == 'focus') {
       final seconds = sessionStart != null ? sessionEnd!.difference(sessionStart!).inSeconds : focusMinutes * 60;
       _addStat(sessions: 1, focusSeconds: seconds);
+      if (isAuthenticated && sessionStart != null) {
+        final client = Supabase.instance.client;
+        await client.from('focus_sessions').insert({
+          'user_id': userId,
+          'session_type': 'pomodoro',
+          'started_at': sessionStart!.toUtc().toIso8601String(),
+          'ended_at': sessionEnd!.toUtc().toIso8601String(),
+          'duration_seconds': seconds,
+          'completed': true,
+        });
+      }
       completedFocusCount += 1;
       final useLong = completedFocusCount % sessionsBeforeLong == 0;
       if (autoStartNext) {
@@ -249,23 +414,42 @@ class AppState extends ChangeNotifier {
     final prev = tasks[idx].done;
     tasks[idx] = tasks[idx].copyWith(done: !prev);
     if (!prev) _addStat(tasksDone: 1); else _addStat(tasksDone: -1);
+    if (isAuthenticated) {
+      try {
+        await Supabase.instance.client.from('tasks').update({
+          'status': (!prev) ? 'done' : 'todo',
+          'updated_at': DateTime.now().toIso8601String(),
+        }).eq('id', task.id);
+      } catch (_) {}
+    }
     await save();
     notifyListeners();
   }
 
   Future<void> addTask(String title, String priority) async {
-    tasks = [
-      ...tasks,
-      TaskItem(
-        id: UniqueKey().toString(),
-        title: title.trim(),
-        priority: priority,
-        done: false,
-        order: DateTime.now().millisecondsSinceEpoch,
-        createdAt: DateTime.now().millisecondsSinceEpoch,
-        date: todayKey(),
-      ),
-    ];
+    final local = TaskItem(
+      id: UniqueKey().toString(),
+      title: title.trim(),
+      priority: priority,
+      done: false,
+      order: DateTime.now().millisecondsSinceEpoch,
+      createdAt: DateTime.now().millisecondsSinceEpoch,
+      date: todayKey(),
+    );
+    TaskItem toInsert = local;
+    if (isAuthenticated) {
+      try {
+        final row = await Supabase.instance.client.from('tasks').insert({
+          'title': local.title,
+          'notes': null,
+          'priority': _priorityToInt(local.priority),
+          'status': 'todo',
+          'due_date': _dateStringToDueDate(local.date).toIso8601String(),
+        }).select().single();
+        toInsert = local.copyWith(id: row['id'] as String);
+      } catch (_) {}
+    }
+    tasks = [...tasks, toInsert];
     await save();
     notifyListeners();
   }
@@ -275,6 +459,9 @@ class AppState extends ChangeNotifier {
     if (idx == -1) return;
     final wasDone = tasks[idx].done;
     tasks.removeAt(idx);
+    if (isAuthenticated) {
+      try { await Supabase.instance.client.from('tasks').delete().eq('id', id); } catch (_) {}
+    }
     if (wasDone) _addStat(tasksDone: -1);
     await save();
     notifyListeners();
@@ -290,6 +477,68 @@ class AppState extends ChangeNotifier {
     }
     await save();
     notifyListeners();
+  }
+}
+
+class AuthPage extends StatefulWidget {
+  const AuthPage({super.key});
+  @override
+  State<AuthPage> createState() => _AuthPageState();
+}
+
+class _AuthPageState extends State<AuthPage> {
+  final _email = TextEditingController();
+  final _password = TextEditingController();
+  bool _loading = false;
+  String? _error;
+
+  @override
+  Widget build(BuildContext context) {
+    final app = context.watch<AppState>();
+    return Scaffold(
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text('FocusKit', style: Theme.of(context).textTheme.headlineMedium),
+                  const SizedBox(height: 16),
+                  if (!app.supaReady)
+                    const Text('Supabase not configured. Edit assets/env.json.', textAlign: TextAlign.center),
+                  if (app.supaReady) ...[
+                    TextField(controller: _email, decoration: const InputDecoration(labelText: 'Email')),
+                    const SizedBox(height: 12),
+                    TextField(controller: _password, decoration: const InputDecoration(labelText: 'Password'), obscureText: true),
+                    const SizedBox(height: 12),
+                    if (_error != null) Text(_error!, style: const TextStyle(color: Colors.red)),
+                    const SizedBox(height: 8),
+                    ElevatedButton(
+                      onPressed: _loading ? null : () async {
+                        setState(() { _loading = true; _error = null; });
+                        try {
+                          final ok = await context.read<AppState>().signInWithPassword(_email.text.trim(), _password.text);
+                          if (!ok) setState(() { _error = 'Sign-in failed'; });
+                        } catch (e) {
+                          setState(() { _error = '$e'; });
+                        } finally {
+                          if (mounted) setState(() { _loading = false; });
+                        }
+                      },
+                      child: _loading ? const CircularProgressIndicator() : const Text('Sign in'),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -671,7 +920,17 @@ class SettingsPage extends StatelessWidget {
         const SizedBox(height: 24),
         const Text('Sync (Supabase)', style: TextStyle(fontWeight: FontWeight.w600)),
         const SizedBox(height: 8),
-        Text('Configure your Supabase project in assets/env.json (url + anon key). Syncing will be added in a follow-up.'),
+        if (!app.supaReady) const Text('Supabase not configured. Edit assets/env.json'),
+        if (app.supaReady && app.isAuthenticated)
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Signed in as ${app.userId}'),
+              OutlinedButton(onPressed: () => app.signOut(), child: const Text('Sign out')),
+            ],
+          ),
+        if (app.supaReady && !app.isAuthenticated)
+          const Text('Please sign in to sync (tap back and go to Sign In screen).'),
       ],
     );
   }
