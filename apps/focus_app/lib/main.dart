@@ -28,20 +28,34 @@ class FocusKitApp extends StatelessWidget {
               : app.themeMode == 'light'
                   ? ThemeMode.light
                   : ThemeMode.system;
+          final Color seed = app.accentColor;
+          final baseLight = ThemeData(
+            useMaterial3: true,
+            colorSchemeSeed: seed,
+            brightness: Brightness.light,
+            visualDensity: VisualDensity.comfortable,
+            cardTheme: const CardTheme(surfaceTintColor: Colors.transparent),
+            scaffoldBackgroundColor: const Color(0xFFF7F7F7),
+          );
+          final baseDark = ThemeData(
+            useMaterial3: true,
+            colorSchemeSeed: seed,
+            brightness: Brightness.dark,
+            visualDensity: VisualDensity.comfortable,
+            cardTheme: const CardTheme(surfaceTintColor: Colors.transparent),
+          );
+          final ThemeData darkTheme = app.amoledDark
+              ? baseDark.copyWith(
+                  scaffoldBackgroundColor: Colors.black,
+                  colorScheme: baseDark.colorScheme.copyWith(surface: Colors.black, background: Colors.black),
+                )
+              : baseDark;
           return MaterialApp(
             debugShowCheckedModeBanner: false,
             title: 'FocusKit',
             themeMode: themeMode,
-            theme: ThemeData(
-              useMaterial3: true,
-              colorSchemeSeed: Colors.indigo,
-              brightness: Brightness.light,
-            ),
-            darkTheme: ThemeData(
-              useMaterial3: true,
-              colorSchemeSeed: Colors.indigo,
-              brightness: Brightness.dark,
-            ),
+            theme: baseLight,
+            darkTheme: darkTheme,
             home: app.supaReady && !app.isAuthenticated
                 ? const AuthPage()
                 : const HomePage(),
@@ -64,14 +78,30 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final app = context.watch<AppState>();
     final pages = [
       const TimerPage(),
       const TasksPage(),
       const ReportsPage(),
       const SettingsPage(),
     ];
+    final duration = app.reduceMotion ? Duration.zero : const Duration(milliseconds: 250);
     return Scaffold(
-      body: SafeArea(child: pages[_index]),
+      body: SafeArea(
+        child: AnimatedSwitcher(
+          duration: duration,
+          transitionBuilder: (child, anim) {
+            final offset = Tween<Offset>(begin: const Offset(0.04, 0), end: Offset.zero)
+                .chain(CurveTween(curve: Curves.easeOutCubic))
+                .animate(anim);
+            return FadeTransition(
+              opacity: anim,
+              child: SlideTransition(position: offset, child: child),
+            );
+          },
+          child: KeyedSubtree(key: ValueKey(_index), child: pages[_index]),
+        ),
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (i) => setState(() => _index = i),
@@ -92,6 +122,7 @@ class AppState extends ChangeNotifier {
   bool isAuthenticated = false;
   String? userId;
   RealtimeChannel? _tasksChannel;
+
   // Settings
   int focusMinutes = 25;
   int breakMinutes = 5;
@@ -99,14 +130,20 @@ class AppState extends ChangeNotifier {
   int sessionsBeforeLong = 4;
   bool autoStartNext = true;
   String themeMode = 'system'; // system | light | dark
+  Color accentColor = Colors.indigo;
+  bool reduceMotion = false;
+  bool amoledDark = false;
+
   // Timer
   String currentMode = 'idle'; // idle | focus | break
   DateTime? sessionEnd;
   DateTime? sessionStart;
   int completedFocusCount = 0;
   Timer? _ticker;
+
   // Tasks
   List<TaskItem> tasks = [];
+
   // Stats
   Map<String, DayStat> stats = {}; // yyyy-mm-dd -> stat
   // Blocklist (default)
@@ -121,6 +158,10 @@ class AppState extends ChangeNotifier {
     sessionsBeforeLong = prefs.getInt('sessionsBeforeLong') ?? 4;
     autoStartNext = prefs.getBool('autoStartNext') ?? true;
     themeMode = prefs.getString('themeMode') ?? 'system';
+    final accent = prefs.getInt('accentColor');
+    if (accent != null) accentColor = Color(accent);
+    reduceMotion = prefs.getBool('reduceMotion') ?? false;
+    amoledDark = prefs.getBool('amoledDark') ?? false;
 
     tasks = (prefs.getStringList('tasks') ?? [])
         .map((s) => TaskItem.fromJson(jsonDecode(s) as Map<String, dynamic>))
@@ -152,6 +193,9 @@ class AppState extends ChangeNotifier {
     await prefs.setInt('sessionsBeforeLong', sessionsBeforeLong);
     await prefs.setBool('autoStartNext', autoStartNext);
     await prefs.setString('themeMode', themeMode);
+    await prefs.setInt('accentColor', accentColor.value);
+    await prefs.setBool('reduceMotion', reduceMotion);
+    await prefs.setBool('amoledDark', amoledDark);
     await prefs.setStringList('tasks', tasks.map((t) => jsonEncode(t.toJson())).toList());
     await prefs.setString('stats', jsonEncode(stats.map((k, v) => MapEntry(k, v.toJson()))));
     if (isAuthenticated) {
@@ -895,6 +939,15 @@ class TimerPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
+    final remaining = app.sessionEnd?.difference(DateTime.now()).inSeconds ?? 0;
+    final total = app.currentMode == 'focus'
+        ? (app.focusMinutes * 60)
+        : app.currentMode == 'break'
+            ? (app.completedFocusCount % app.sessionsBeforeLong == 0 ? app.longBreakMinutes * 60 : app.breakMinutes * 60)
+            : 0;
+    final progress = (total > 0 && remaining > 0) ? 1 - (remaining / total) : 0.0;
+    final duration = app.reduceMotion ? Duration.zero : const Duration(milliseconds: 220);
+
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -903,7 +956,30 @@ class TimerPage extends StatelessWidget {
           const SizedBox(height: 8),
           Text('Mode: ${app.currentMode}', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
-          Text(_formatRemaining(app.sessionEnd), style: Theme.of(context).textTheme.displayMedium?.copyWith(fontFeatures: const [FontFeature.tabularFigures()])),
+          AnimatedSwitcher(
+            duration: duration,
+            transitionBuilder: (child, anim) => FadeTransition(
+              opacity: anim,
+              child: ScaleTransition(scale: Tween(begin: 0.98, end: 1.0).animate(anim), child: child),
+            ),
+            child: Text(
+              _formatRemaining(app.sessionEnd),
+              key: ValueKey(app.sessionEnd?.difference(DateTime.now()).inSeconds.toString()),
+              style: Theme.of(context).textTheme.displayMedium?.copyWith(
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: TweenAnimationBuilder<double>(
+              tween: Tween<double>(begin: 0, end: progress.clamp(0, 1)),
+              duration: duration,
+              curve: Curves.easeOutCubic,
+              builder: (context, value, _) => LinearProgressIndicator(value: value),
+            ),
+          ),
           const SizedBox(height: 24),
           Wrap(
             spacing: 8,
@@ -997,26 +1073,36 @@ class _TasksPageState extends State<TasksPage> {
               onReorder: (o, n) => app.reorderTasks(o, n),
               itemBuilder: (context, i) {
                 final t = todays[i];
-                return ListTile(
+                return AnimatedContainer(
                   key: ValueKey(t.id),
-                  leading: Checkbox(value: t.done, onChanged: (_) => app.toggleTaskDone(t)),
-                  title: Text(
-                    t.title,
-                    style: TextStyle(
-                      decoration: t.done ? TextDecoration.lineThrough : null,
-                    ),
+                  duration: app.reduceMotion ? Duration.zero : const Duration(milliseconds: 220),
+                  curve: Curves.easeOutCubic,
+                  decoration: BoxDecoration(
+                    color: t.done ? Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.3) : Colors.transparent,
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                  subtitle: Text('Priority: ${t.priority}'),
-                  trailing: Wrap(spacing: 8, children: [
-                    OutlinedButton(
-                      onPressed: () => app.startFocus(),
-                      child: const Text('Focus'),
+                  child: ListTile(
+                    leading: Checkbox(value: t.done, onChanged: (_) => app.toggleTaskDone(t)),
+                    title: AnimatedDefaultTextStyle(
+                      duration: app.reduceMotion ? Duration.zero : const Duration(milliseconds: 200),
+                      style: TextStyle(
+                        decoration: t.done ? TextDecoration.lineThrough : null,
+                        color: t.done ? Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6) : null,
+                      ),
+                      child: Text(t.title),
                     ),
-                    IconButton(
-                      onPressed: () => app.deleteTask(t.id),
-                      icon: const Icon(Icons.delete_outline),
-                    ),
-                  ]),
+                    subtitle: Text('Priority: ${t.priority}'),
+                    trailing: Wrap(spacing: 8, children: [
+                      OutlinedButton(
+                        onPressed: () => app.startFocus(),
+                        child: const Text('Focus'),
+                      ),
+                      IconButton(
+                        onPressed: () => app.deleteTask(t.id),
+                        icon: const Icon(Icons.delete_outline),
+                      ),
+                    ]),
+                  ),
                 );
               },
             ),
@@ -1036,9 +1122,9 @@ class _TasksPageState extends State<TasksPage> {
 
 class ReportsPage extends StatelessWidget {
   const ReportsPage({super.key});
-
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) { return _build(context); }
+  Widget _build(BuildContext context) {
     final app = context.watch<AppState>();
     final now = DateTime.now();
     final days = List.generate(7, (i) {
@@ -1047,7 +1133,6 @@ class ReportsPage extends StatelessWidget {
       final stat = app.stats[key] ?? DayStat(sessions: 0, focusSeconds: 0, tasksDone: 0);
       return _DayRow(date: d, stat: stat);
     });
-
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -1087,7 +1172,6 @@ class ReportsPage extends StatelessWidget {
       ),
     );
   }
-
   void _exportCsv(BuildContext context, AppState app) {
     final now = DateTime.now();
     final rows = <List<String>>[
@@ -1151,6 +1235,7 @@ class SettingsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
+    final swatches = <Color>[Colors.indigo, Colors.teal, Colors.blue, Colors.purple, Colors.pink, Colors.orange, Colors.green, Colors.cyan];
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -1165,6 +1250,27 @@ class SettingsPage extends StatelessWidget {
           selected: {app.themeMode},
           onSelectionChanged: (s) { app.themeMode = s.first; app.save(); },
         ),
+        const SizedBox(height: 12),
+        Text('Accent color', style: Theme.of(context).textTheme.titleSmall),
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          for (final c in swatches)
+            GestureDetector(
+              onTap: () { app.accentColor = c; app.save(); },
+              child: AnimatedContainer(
+                duration: app.reduceMotion ? Duration.zero : const Duration(milliseconds: 200),
+                width: 28, height: 28,
+                decoration: BoxDecoration(
+                  color: c,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: c.value == app.accentColor.value ? Colors.white : Colors.transparent, width: 2),
+                ),
+              ),
+            ),
+        ]),
+        const SizedBox(height: 8),
+        SwitchListTile(value: app.amoledDark, onChanged: (b) { app.amoledDark = b; app.save(); }, title: const Text('True black (dark mode)')),
+        SwitchListTile(value: app.reduceMotion, onChanged: (b) { app.reduceMotion = b; app.save(); }, title: const Text('Reduce motion')),
         const SizedBox(height: 24),
         const Text('Sync (Supabase)', style: TextStyle(fontWeight: FontWeight.w600)),
         const SizedBox(height: 8),
@@ -1190,20 +1296,6 @@ class SettingsPage extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         _BlocklistEditor(),
-        const SizedBox(height: 24),
-        const Text('Sync (Supabase)', style: TextStyle(fontWeight: FontWeight.w600)),
-        const SizedBox(height: 8),
-        if (!app.supaReady) const Text('Supabase not configured. Edit assets/env.json'),
-        if (app.supaReady && app.isAuthenticated)
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text('Signed in as ${app.userId}'),
-              OutlinedButton(onPressed: () => app.signOut(), child: const Text('Sign out')),
-            ],
-          ),
-        if (app.supaReady && !app.isAuthenticated)
-          const Text('Please sign in to sync (tap back and go to Sign In screen).'),
       ],
     );
   }
