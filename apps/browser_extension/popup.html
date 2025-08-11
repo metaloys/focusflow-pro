@@ -36,6 +36,12 @@
       /* Reports */
       .report-row { display: grid; grid-template-columns: 86px 1fr 1fr 1fr; gap: 8px; font-size: 12px; padding: 4px 0; border-bottom: 1px dashed #eee; }
       .report-header { color: #666; font-weight: 600; }
+      .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.35); display: none; align-items: center; justify-content: center; }
+      .dialog { background: #fff; border-radius: 10px; padding: 16px; width: 320px; box-shadow: 0 10px 30px rgba(0,0,0,0.15); }
+      .dialog h3 { margin: 0 0 8px; font-size: 14px; }
+      .dialog .row { margin-bottom: 8px; }
+      .dialog footer { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+      .export-row { display: flex; justify-content: flex-end; margin-top: 6px; }
     </style>
   </head>
   <body>
@@ -89,6 +95,26 @@
       <div>Tasks</div>
     </div>
     <div id="reports"></div>
+    <div class="export-row"><button id="export" class="secondary">Export CSV</button></div>
+
+    <div class="overlay" id="pause-overlay">
+      <div class="dialog">
+        <h3>Why pause?</h3>
+        <div class="row">
+          <select id="pause-reason">
+            <option value="bio">Bio break</option>
+            <option value="ping">Urgent ping</option>
+            <option value="meeting">Meeting</option>
+            <option value="fatigue">Fatigue</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <footer>
+          <button id="pause-cancel" class="secondary">Cancel</button>
+          <button id="pause-confirm">Confirm</button>
+        </footer>
+      </div>
+    </div>
 
     <div class="row" style="justify-content: space-between; margin-top: 8px;">
       <a href="options.html" target="_blank">Edit blocklist</a>

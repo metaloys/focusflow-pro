@@ -19,5 +19,27 @@
     "default_title": "FocusKit",
     "default_popup": "popup.html"
   },
-  "options_page": "options.html"
+  "options_page": "options.html",
+  "commands": {
+    "start_focus": {
+      "suggested_key": { "default": "Ctrl+Shift+8" },
+      "description": "Start a focus session with your Pomodoro focus minutes"
+    },
+    "stop_focus": {
+      "suggested_key": { "default": "Ctrl+Shift+9" },
+      "description": "Stop the current focus session"
+    },
+    "toggle_focus": {
+      "suggested_key": { "default": "Ctrl+Shift+0" },
+      "description": "Toggle focus on/off"
+    },
+    "start_pomodoro": {
+      "suggested_key": { "default": "Ctrl+Shift+7" },
+      "description": "Start Pomodoro cycle"
+    },
+    "stop_pomodoro": {
+      "suggested_key": { "default": "Ctrl+Shift+6" },
+      "description": "Stop Pomodoro cycle"
+    }
+  }
 }

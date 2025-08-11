@@ -284,6 +284,30 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   }
 });
 
+chrome.commands?.onCommand?.addListener(async (command) => {
+  const data = await getStorage([
+    STORAGE_KEYS.focusMinutes,
+    STORAGE_KEYS.currentMode,
+    STORAGE_KEYS.focusEnabled
+  ]);
+  if (command === 'start_focus') {
+    await startFocusSession(Number(data[STORAGE_KEYS.focusMinutes] || 25));
+  } else if (command === 'stop_focus') {
+    await stopFocusSession();
+  } else if (command === 'toggle_focus') {
+    const enabled = Boolean(data[STORAGE_KEYS.focusEnabled]);
+    if (enabled && (data[STORAGE_KEYS.currentMode] === 'focus')) {
+      await stopFocusSession();
+    } else {
+      await startFocusSession(Number(data[STORAGE_KEYS.focusMinutes] || 25));
+    }
+  } else if (command === 'start_pomodoro') {
+    await startPomodoroCycle({});
+  } else if (command === 'stop_pomodoro') {
+    await stopPomodoroCycle();
+  }
+});
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
     if (message && message.type === 'getStatus') {
@@ -339,6 +363,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // Adjust tasks done counter for today by +delta
       const delta = Number(message.delta || 0);
       if (delta !== 0) await updateTodayStats({ tasksDone: delta });
+      sendResponse({ ok: true });
+      return;
+    }
+    if (message && message.type === 'stats:addPauseReason') {
+      const reason = String(message.reason || 'other').toLowerCase();
+      const data = await getStorage([STORAGE_KEYS.stats]);
+      const stats = data[STORAGE_KEYS.stats] || {};
+      const key = todayKey();
+      const day = stats[key] || { sessions: 0, focusSeconds: 0, tasksDone: 0 };
+      day.pauses = day.pauses || {};
+      day.pauses[reason] = (day.pauses[reason] || 0) + 1;
+      stats[key] = day;
+      await setStorage({ [STORAGE_KEYS.stats]: stats });
       sendResponse({ ok: true });
       return;
     }

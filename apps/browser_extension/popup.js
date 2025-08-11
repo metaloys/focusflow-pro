@@ -18,6 +18,13 @@ const taskPriorityEl = document.getElementById('task-priority');
 const taskAddBtn = document.getElementById('task-add');
 
 const reportsEl = document.getElementById('reports');
+const exportBtn = document.getElementById('export');
+const pauseOverlay = document.getElementById('pause-overlay');
+const pauseReasonEl = document.getElementById('pause-reason');
+const pauseCancelBtn = document.getElementById('pause-cancel');
+const pauseConfirmBtn = document.getElementById('pause-confirm');
+
+let latestStatus = null;
 
 function sendMessage(message) {
   return new Promise((resolve) => chrome.runtime.sendMessage(message, resolve));
@@ -183,6 +190,7 @@ async function renderTasks() {
 
 async function refreshStatus() {
   const res = await sendMessage({ type: 'getStatus' });
+  latestStatus = res;
   if (!res) return;
   minutesEl.value = res.sessionMinutes || 25;
 
@@ -263,7 +271,25 @@ startBtn.addEventListener('click', async () => {
   ensureTicking();
 });
 
+function openPauseDialog() {
+  pauseOverlay.style.display = 'flex';
+}
+function closePauseDialog() {
+  pauseOverlay.style.display = 'none';
+}
+
+pauseCancelBtn?.addEventListener('click', () => closePauseDialog());
+
+pauseConfirmBtn?.addEventListener('click', async () => {
+  const reason = pauseReasonEl.value || 'other';
+  await sendMessage({ type: 'stats:addPauseReason', reason });
+  closePauseDialog();
+});
+
 stopBtn.addEventListener('click', async () => {
+  if (latestStatus && latestStatus.currentMode === 'focus') {
+    openPauseDialog();
+  }
   await sendMessage({ type: 'stopFocus' });
   await refreshStatus();
 });
@@ -282,6 +308,9 @@ pStartBtn.addEventListener('click', async () => {
 });
 
 pStopBtn.addEventListener('click', async () => {
+  if (latestStatus && latestStatus.currentMode === 'focus') {
+    openPauseDialog();
+  }
   await sendMessage({ type: 'stopPomodoro' });
   await refreshStatus();
 });
@@ -303,6 +332,37 @@ taskAddBtn.addEventListener('click', addTaskFromInput);
 
 taskInputEl.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') addTaskFromInput();
+});
+
+function toCsvValue(v) {
+  if (v == null) return '';
+  const s = String(v);
+  if (/[",\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
+
+function download(filename, content, type = 'text/csv') {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+exportBtn?.addEventListener('click', async () => {
+  const res = await sendMessage({ type: 'getStatus' });
+  const stats = (res && res.stats) ? res.stats : {};
+  const rows = [['Date', 'Focus minutes', 'Sessions', 'Tasks done']];
+  // Export last 30 days
+  const now = new Date();
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+    const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    const day = stats[key] || { sessions: 0, focusSeconds: 0, tasksDone: 0 };
+    rows.push([key, Math.floor((day.focusSeconds||0)/60), day.sessions||0, day.tasksDone||0]);
+  }
+  const csv = rows.map(r => r.map(toCsvValue).join(',')).join('\n');
+  download('focuskit_report.csv', csv);
 });
 
 (async function init() {
