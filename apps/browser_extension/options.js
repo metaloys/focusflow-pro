@@ -84,7 +84,7 @@ addBtn.addEventListener('click', async () => {
 
 // ---------------- Supabase sync for blocklist ----------------
 const SB_CFG_KEY = 'sb_config'; // { url, key, email }
-let sbSession = null; // { access_token, user }
+let sbSession = null; // { access_token, refresh_token, user }
 let sbDefaultBlocklistId = null;
 
 async function hydrateSupabaseForm() {
@@ -129,6 +129,24 @@ async function sbSignIn() {
   });
   if (!res.ok) throw new Error(`Auth failed: ${res.status}`);
   sbSession = await res.json();
+  await setStorage({ SB_SESSION: sbSession, SB_CFG_KEY: { url, key, email } });
+}
+
+async function sbRefreshSessionIfNeeded() {
+  const url = sbUrlEl.value.trim();
+  const key = sbKeyEl.value.trim();
+  if (!sbSession || !sbSession.refresh_token) return;
+  // Lightweight endpoint to verify access_token: get user
+  const res = await fetch(`${url}/auth/v1/user`, { headers: { 'apikey': key, 'Authorization': `Bearer ${sbSession.access_token}` } });
+  if (res.ok) return; // still valid
+  // Refresh
+  const r = await fetch(`${url}/auth/v1/token?grant_type=refresh_token`, {
+    method: 'POST',
+    headers: { 'apikey': key, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refresh_token: sbSession.refresh_token })
+  });
+  if (!r.ok) throw new Error('Failed to refresh session');
+  sbSession = await r.json();
   await setStorage({ SB_SESSION: sbSession });
 }
 
@@ -187,9 +205,17 @@ sbRefreshBtn?.addEventListener('click', async () => {
     const sess = await getStorage(['SB_SESSION']);
     sbSession = sess['SB_SESSION'] || null;
     if (!sbSession) throw new Error('Please sign in first');
+    await sbRefreshSessionIfNeeded();
     await pullBlocklistFromCloud();
     setSbStatus('Refreshed from cloud.');
   } catch (e) {
     setSbStatus(String(e));
   }
 });
+
+// Try load stored session on start
+(async function initSession() {
+  const sess = await getStorage(['SB_SESSION']);
+  sbSession = sess['SB_SESSION'] || null;
+  if (sbSession) setSbStatus('Loaded saved session.');
+})();

@@ -1057,11 +1057,19 @@ class ReportsPage extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text('Last 7 days', style: Theme.of(context).textTheme.titleMedium),
-              OutlinedButton.icon(
-                onPressed: () => _exportCsv(context, app),
-                icon: const Icon(Icons.download),
-                label: const Text('Export CSV'),
-              ),
+              Row(children: [
+                OutlinedButton.icon(
+                  onPressed: () => app.refreshRemoteStats(days: 7),
+                  icon: const Icon(Icons.sync),
+                  label: const Text('Sync now'),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  onPressed: () => _exportCsv(context, app),
+                  icon: const Icon(Icons.download),
+                  label: const Text('Export CSV'),
+                ),
+              ]),
             ],
           ),
           const SizedBox(height: 12),
