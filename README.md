@@ -1,5 +1,7 @@
 # FocusKit
 
+[![Deploys by Netlify](https://www.netlify.com/img/global/badges/netlify-light.svg)](https://app.netlify.com/) [![CI](https://github.com/your-org/your-repo/actions/workflows/ci.yml/badge.svg)](../../actions)
+
 A polished, local-first focus and productivity toolkit for remote workers. Cross-platform app (Flutter), distraction-blocking browser extension, and privacy-first sync/analytics via Supabase.
 
 ## Deploy to Netlify (Flutter web)
@@ -14,6 +16,20 @@ A polished, local-first focus and productivity toolkit for remote workers. Cross
 4) Deploy. Netlify will install Flutter SDK, build Flutter web, and publish.
 
 SPA redirects are configured in `apps/focus_app/web/_redirects` and `netlify.toml`.
+
+### Preview deploys (GitHub Actions)
+- Create a Netlify site and generate a personal access token
+- Add GitHub repository secrets:
+  - `NETLIFY_AUTH_TOKEN`
+  - `NETLIFY_SITE_ID` (staging/preview site)
+  - `NETLIFY_SITE_NAME` (visible name on Netlify)
+  - `SUPABASE_URL_STAGING`
+  - `SUPABASE_ANON_KEY_STAGING`
+- Open a PR; the workflow posts a sticky comment with a preview URL.
+
+### Production deploys
+- In Netlify, connect the main branch and use the same build command/publish dir
+- Set production env vars `SUPABASE_URL` and `SUPABASE_ANON_KEY` in Netlify UI
 
 ## What’s included (MVP scaffold)
 - Distraction Blocker: Manifest V3 browser extension with dynamic rules to block sites during focus sessions

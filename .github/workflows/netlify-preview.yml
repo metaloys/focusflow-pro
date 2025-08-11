@@ -1,0 +1,50 @@
+name: netlify-preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Make build script executable
+        run: chmod +x netlify-build.sh
+
+      - name: Build Flutter web
+        run: bash ./netlify-build.sh
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL_STAGING }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY_STAGING }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Netlify CLI
+        run: npm i -g netlify-cli@17
+
+      - name: Deploy Preview to Netlify
+        id: deploy
+        run: |
+          netlify deploy \
+            --auth "${{ secrets.NETLIFY_AUTH_TOKEN }}" \
+            --site "${{ secrets.NETLIFY_SITE_ID }}" \
+            --dir apps/focus_app/build/web \
+            --message "PR #${{ github.event.number }} @ ${{ github.sha }}" \
+            --json > deploy.json
+          echo "url=$(jq -r .deploy_url deploy.json)" >> $GITHUB_OUTPUT
+          echo "log-url=https://app.netlify.com/sites/${{ secrets.NETLIFY_SITE_NAME }}/deploys" >> $GITHUB_OUTPUT
+
+      - name: Comment Preview URL
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          message: |
+            Netlify Preview: ${{ steps.deploy.outputs.url }}
+            Deploy logs: ${{ steps.deploy.outputs.log-url }}
