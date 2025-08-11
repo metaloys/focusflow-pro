@@ -1,0 +1,125 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FocusKit</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 12px; min-width: 360px; }
+      h1 { font-size: 16px; margin: 0 0 8px; }
+      h2 { font-size: 13px; margin: 14px 0 6px; color: #555; }
+      .row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+      input[type=number] { width: 70px; padding: 6px; }
+      input[type=text] { flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 8px; }
+      select { padding: 8px; border-radius: 8px; border: 1px solid #ddd; }
+      input[type=checkbox] { transform: scale(1.2); }
+      button { padding: 8px 12px; border-radius: 8px; border: 1px solid #ccc; background: #111; color: #fff; cursor: pointer; }
+      button.secondary { background: #f5f5f5; color: #111; }
+      .status { font-size: 12px; color: #555; margin-top: 8px; }
+      .countdown { font-variant-numeric: tabular-nums; font-weight: 600; }
+      a { font-size: 12px; color: #2563eb; text-decoration: none; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+      label small { color: #666; }
+      /* Tasks */
+      .tasks { margin-top: 8px; }
+      .task-row { display: grid; grid-template-columns: 18px 1fr auto auto; gap: 8px; align-items: center; border: 1px solid #eee; border-radius: 8px; padding: 6px 8px; margin-bottom: 6px; background: #fff; }
+      .task-title { font-size: 13px; }
+      .task-title.done { text-decoration: line-through; color: #888; }
+      .drag { cursor: grab; color: #888; padding: 0 4px; user-select: none; }
+      .prio { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #555; }
+      .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+      .dot.low { background: #10b981; }
+      .dot.normal { background: #3b82f6; }
+      .dot.high { background: #f59e0b; }
+      .dot.urgent { background: #ef4444; }
+      .task-actions button { padding: 6px 8px; font-size: 12px; }
+      /* Reports */
+      .report-row { display: grid; grid-template-columns: 86px 1fr 1fr 1fr; gap: 8px; font-size: 12px; padding: 4px 0; border-bottom: 1px dashed #eee; }
+      .report-header { color: #666; font-weight: 600; }
+      .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.35); display: none; align-items: center; justify-content: center; }
+      .dialog { background: #fff; border-radius: 10px; padding: 16px; width: 320px; box-shadow: 0 10px 30px rgba(0,0,0,0.15); }
+      .dialog h3 { margin: 0 0 8px; font-size: 14px; }
+      .dialog .row { margin-bottom: 8px; }
+      .dialog footer { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+      .export-row { display: flex; justify-content: flex-end; margin-top: 6px; }
+    </style>
+  </head>
+  <body>
+    <h1>FocusKit</h1>
+
+    <h2>Quick focus</h2>
+    <div class="row">
+      <label>Session (min)</label>
+      <input id="minutes" type="number" min="1" max="180" step="1" value="25" />
+    </div>
+    <div class="row">
+      <button id="start">Start Focus</button>
+      <button id="stop" class="secondary">Stop</button>
+    </div>
+
+    <h2>Pomodoro</h2>
+    <div class="grid">
+      <label>Focus <input id="p-focus" type="number" min="5" max="180" value="25" /></label>
+      <label>Break <input id="p-break" type="number" min="1" max="60" value="5" /></label>
+      <label>Long <input id="p-long" type="number" min="5" max="60" value="15" /></label>
+      <label>Before long <input id="p-count" type="number" min="1" max="10" value="4" /></label>
+      <label style="grid-column: span 2; display: flex; align-items: center; gap: 8px;">
+        <input id="p-auto" type="checkbox" checked />
+        <span>Auto-start next</span>
+      </label>
+    </div>
+    <div class="row">
+      <button id="p-start">Start Cycle</button>
+      <button id="p-stop" class="secondary">Stop</button>
+    </div>
+    <div class="status">Mode: <span id="p-mode">idle</span> • <span class="countdown" id="p-remaining">--:--</span></div>
+
+    <h2>Daily tasks</h2>
+    <div class="row">
+      <input id="task-input" type="text" placeholder="Add a task…" />
+      <select id="task-priority">
+        <option value="normal">Normal</option>
+        <option value="low">Low</option>
+        <option value="high">High</option>
+        <option value="urgent">Urgent</option>
+      </select>
+      <button id="task-add">Add</button>
+    </div>
+    <div class="tasks" id="tasks"></div>
+
+    <h2>Reports (7 days)</h2>
+    <div class="report-row report-header">
+      <div>Date</div>
+      <div>Focus</div>
+      <div>Sessions</div>
+      <div>Tasks</div>
+    </div>
+    <div id="reports"></div>
+    <div class="export-row"><button id="export" class="secondary">Export CSV</button></div>
+
+    <div class="overlay" id="pause-overlay">
+      <div class="dialog">
+        <h3>Why pause?</h3>
+        <div class="row">
+          <select id="pause-reason">
+            <option value="bio">Bio break</option>
+            <option value="ping">Urgent ping</option>
+            <option value="meeting">Meeting</option>
+            <option value="fatigue">Fatigue</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <footer>
+          <button id="pause-cancel" class="secondary">Cancel</button>
+          <button id="pause-confirm">Confirm</button>
+        </footer>
+      </div>
+    </div>
+
+    <div class="row" style="justify-content: space-between; margin-top: 8px;">
+      <a href="options.html" target="_blank">Edit blocklist</a>
+    </div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

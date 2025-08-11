@@ -1,0 +1,34 @@
+# General
+.DS_Store
+*.log
+*.tmp
+*.swp
+.idea/
+.vscode/
+.env
+.env.*
+coverage/
+
+# Node / web
+node_modules/
+dist/
+build/
+.tmp/
+.eslintcache
+
+# Flutter / Dart
+.dart_tool/
+.packages
+.pub-cache/
+.flutter-plugins
+.flutter-plugins-dependencies
+.melos_tool/
+
+# Flutter builds
+build/
+**/Pods/
+ios/Flutter/ephemeral/
+macos/Flutter/ephemeral/
+
+# Web extension
+apps/browser_extension/*.zip

@@ -1,0 +1,26 @@
+name: focuskit
+description: Cross-platform focus & productivity app (Flutter) for FocusKit
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/env.json
+
+dependencies:
+  flutter:
+    sdk: flutter
+  provider: ^6.0.5
+  shared_preferences: ^2.2.2
+  intl: ^0.19.0
+  supabase_flutter: ^2.5.3
+
+# Dev tooling and linting
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0

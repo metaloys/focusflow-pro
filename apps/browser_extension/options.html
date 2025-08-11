@@ -1,0 +1,49 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FocusKit Blocklist</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; max-width: 780px; }
+      h1 { font-size: 20px; margin: 0 0 12px; }
+      h2 { font-size: 16px; margin: 20px 0 10px; }
+      .row { display: flex; gap: 8px; margin-bottom: 12px; }
+      input[type=text], input[type=password], input[type=url] { flex: 1; padding: 10px; border: 1px solid #ccc; border-radius: 8px; }
+      button { padding: 10px 14px; border-radius: 8px; border: 1px solid #ccc; background: #111; color: #fff; cursor: pointer; }
+      button.secondary { background: #f5f5f5; color: #111; }
+      ul { list-style: none; padding: 0; }
+      li { display: flex; justify-content: space-between; align-items: center; border: 1px solid #eee; border-radius: 8px; padding: 10px; margin-bottom: 8px; }
+      .hint { color: #666; font-size: 13px; margin-bottom: 12px; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+      .status { color: #555; font-size: 13px; margin-top: 6px; }
+    </style>
+  </head>
+  <body>
+    <h1>Blocklist</h1>
+    <p class="hint">Add domains (e.g., <code>youtube.com</code>, <code>twitter.com</code>). Focus mode applies dynamic blocking rules only while enabled.</p>
+    <div class="row">
+      <input id="domain" type="text" placeholder="domain.com" />
+      <button id="add">Add</button>
+    </div>
+    <ul id="list"></ul>
+
+    <h2>Cloud sync (Supabase)</h2>
+    <p class="hint">Optional: sync your default blocklist from your FocusKit Supabase project. Credentials are stored locally in your browser.</p>
+    <div class="grid">
+      <input id="sb-url" type="url" placeholder="Supabase URL (https://...)" />
+      <input id="sb-key" type="text" placeholder="Supabase anon key" />
+      <input id="sb-email" type="text" placeholder="Email" />
+      <input id="sb-password" type="password" placeholder="Password" />
+    </div>
+    <div class="row">
+      <button id="sb-save" class="secondary">Save config</button>
+      <button id="sb-signin">Sign in & Sync</button>
+      <button id="sb-signout" class="secondary">Sign out</button>
+      <button id="sb-refresh" class="secondary">Refresh from cloud</button>
+    </div>
+    <div class="status" id="sb-status"></div>
+
+    <script src="options.js"></script>
+  </body>
+</html>
