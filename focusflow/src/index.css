@@ -1,0 +1,17 @@
+/* Minimal base styles; Tailwind is provided via CDN in index.html */
+html, body, #root {
+  height: 100%;
+}
+body {
+  margin: 0;
+}
+
+/* Confetti fall animation used by the app */
+@keyframes fall {
+  0% { transform: translateY(-10px) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(110vh) rotate(360deg); opacity: 0; }
+}
+.animate-fall {
+  animation-name: fall;
+  animation-timing-function: linear;
+}
