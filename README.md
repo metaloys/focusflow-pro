@@ -4,6 +4,7 @@ A polished, local-first focus and productivity toolkit for remote workers. Cross
 
 ## What’s included (MVP scaffold)
 - Distraction Blocker: Manifest V3 browser extension with dynamic rules to block sites during focus sessions
+- Pomodoro in extension: focus/break/long break cycles, adjustable durations, auto-start next, live countdown
 - Backend: Supabase SQL schema with RLS for tasks, sessions, settings, and blocklists
 - CI: Basic workflow to validate JSON and shell scripts
 - Docs: Architecture and UX principles
@@ -13,7 +14,7 @@ Flutter app scaffolding will be added next (instructions below) so you can run m
 ## Monorepo structure
 ```
 apps/
-  browser_extension/        # MV3 extension (blocking + focus session controls)
+  browser_extension/        # MV3 extension (blocking + focus sessions + Pomodoro)
   focus_app/                # Flutter app (to be created)
 backend/
   supabase/
@@ -27,12 +28,15 @@ docs/
 
 ## Quickstart
 
-### 1) Browser extension (blocker)
+### 1) Browser extension (blocker + Pomodoro)
 - Load in Chrome/Edge/Brave:
   1. Open `chrome://extensions`
   2. Toggle Developer Mode
   3. Load unpacked -> select `apps/browser_extension`
-- Use the popup to start/stop a focus session and the options page to edit blocklists. Dynamic blocking uses Declarative Net Request rules, applied only while focus mode is on.
+- Popup includes:
+  - Quick Focus: start/stop one session with custom minutes
+  - Pomodoro: adjustable focus/break/long break, sessions before long, auto-start toggle, live countdown
+  - Options page to edit blocklist
 
 ### 2) Supabase backend
 - Create a Supabase project (free tier works)
