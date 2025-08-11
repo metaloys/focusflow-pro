@@ -1,7 +1,6 @@
-jsx;
 import React, { useState, useEffect, useRef } from 'react';
 
-const App = () => {
+export default function App() {
   const [activeTab, setActiveTab] = useState('focus');
   const [activeTasks, setActiveTasks] = useState([
     { id: 1, text: 'Complete project proposal', priority: 'high', category: 'work', completed: false, dueDate: null, createdAt: new Date().toISOString() },
@@ -116,7 +115,7 @@ const App = () => {
     }
   }, []);
 
-  // Save data to localStorage whenever relevant state changes
+  // Save data to localStorage
   useEffect(() => {
     try {
       localStorage.setItem('activeTasks', JSON.stringify(activeTasks));
@@ -480,6 +479,7 @@ const App = () => {
 
   return (
     <div className={`min-h-screen transition-colors duration-300 ${darkMode ? 'dark:bg-slate-900 dark:text-white' : 'bg-gradient-to-br from-slate-50 to-slate-100'}`}>
+      {/* Your full JSX here - already correct */}
       {/* Header */}
       <header className="bg-white dark:bg-slate-800 shadow-sm border-b border-slate-200 dark:border-slate-700 sticky top-0 z-30">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -529,7 +529,7 @@ const App = () => {
           </div>
         </div>
       </header>
-
+      
       {/* Settings Panel */}
       {showSettings && (
         <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
