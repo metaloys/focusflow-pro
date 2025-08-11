@@ -2,6 +2,19 @@
 
 A polished, local-first focus and productivity toolkit for remote workers. Cross-platform app (Flutter), distraction-blocking browser extension, and privacy-first sync/analytics via Supabase.
 
+## Deploy to Netlify (Flutter web)
+1) Push this repo to GitHub
+2) In Netlify, New Site from Git -> choose your repo
+3) Build settings:
+   - Build command: `bash ./netlify-build.sh`
+   - Publish directory: `apps/focus_app/build/web`
+   - Environment variables (optional):
+     - `SUPABASE_URL`
+     - `SUPABASE_ANON_KEY`
+4) Deploy. Netlify will install Flutter SDK, build Flutter web, and publish.
+
+SPA redirects are configured in `apps/focus_app/web/_redirects` and `netlify.toml`.
+
 ## What’s included (MVP scaffold)
 - Distraction Blocker: Manifest V3 browser extension with dynamic rules to block sites during focus sessions
 - Pomodoro in extension: focus/break/long break cycles, adjustable durations, auto-start next, live countdown
