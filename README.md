@@ -9,9 +9,19 @@ A polished, local-first focus and productivity toolkit for remote workers. Cross
 - Reports in extension: 7-day summary of focus time, sessions, and tasks done; CSV export
 - Shortcuts: start/stop/toggle focus, start/stop Pomodoro (configurable in browser)
 - Pause with reason: optional reason logging when stopping focus
+- Flutter app scaffolded: Timer, Tasks, Reports, Settings with local persistence
 - Backend: Supabase SQL schema with RLS for tasks, sessions, settings, and blocklists
 - CI: Basic workflow to validate JSON and shell scripts
 - Docs: Architecture and UX principles
+
+## Run the Flutter app
+```
+cd apps/focus_app
+flutter pub get
+flutter run -d chrome   # or any device
+```
+
+Configure Supabase later in `apps/focus_app/assets/env.json`.
 
 ## Shortcuts (defaults)
 - Start focus: Ctrl+Shift+8
