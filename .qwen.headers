@@ -1,0 +1,14 @@
+HTTP/1.1 200 OK
+Date: Mon, 11 Aug 2025 18:41:16 GMT
+Content-Type: text/html; charset=utf-8
+Transfer-Encoding: chunked
+Connection: keep-alive
+Vary: Accept-Encoding
+Vary: Accept-Encoding
+Set-Cookie: acw_tc=0a03e54317549376768431308e2c4c58b7c5ff1ca6cb90bbc7f1a131cd362e;path=/;HttpOnly;Max-Age=1800
+Vary: Accept-Encoding
+x-request-id: bf621af9-aad8-480e-ab68-7a0fa1d25a72
+cache-control: no-cache
+set-cookie: x-ap=na-vancouver-pop; Path=/; SameSite=lax
+GA-AP: na-vancouver-pop
+
