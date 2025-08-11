@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 
-export default function App() {
+const App = () => {
   const [activeTab, setActiveTab] = useState('focus');
   const [activeTasks, setActiveTasks] = useState([
     { id: 1, text: 'Complete project proposal', priority: 'high', category: 'work', completed: false, dueDate: null, createdAt: new Date().toISOString() },
@@ -115,7 +115,7 @@ export default function App() {
     }
   }, []);
 
-  // Save data to localStorage
+  // Save data to localStorage whenever relevant state changes
   useEffect(() => {
     try {
       localStorage.setItem('activeTasks', JSON.stringify(activeTasks));
@@ -479,7 +479,6 @@ export default function App() {
 
   return (
     <div className={`min-h-screen transition-colors duration-300 ${darkMode ? 'dark:bg-slate-900 dark:text-white' : 'bg-gradient-to-br from-slate-50 to-slate-100'}`}>
-      {/* Your full JSX here - already correct */}
       {/* Header */}
       <header className="bg-white dark:bg-slate-800 shadow-sm border-b border-slate-200 dark:border-slate-700 sticky top-0 z-30">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -529,7 +528,7 @@ export default function App() {
           </div>
         </div>
       </header>
-      
+
       {/* Settings Panel */}
       {showSettings && (
         <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
@@ -1418,7 +1417,7 @@ export default function App() {
       {/* Footer */}
       <footer className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 text-center text-sm text-slate-500 dark:text-slate-400">
         <p>FocusFlow Pro • Premium productivity for remote professionals • Your data is private and secure</p>
-        <p className="mt-1">© 2024 FocusFlow. All rights reserved. Made with ❤️ for remote workers.</p>
+        <p className="mt-1">© 2025 FocusFlow. All rights reserved. Made with ❤️ for remote workers.</p>
       </footer>
     </div>
   );
