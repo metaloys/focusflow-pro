@@ -1,1 +1,65 @@
-# focusflow-pro
+# FocusKit
+
+A polished, local-first focus and productivity toolkit for remote workers. Cross-platform app (Flutter), distraction-blocking browser extension, and privacy-first sync/analytics via Supabase.
+
+## What’s included (MVP scaffold)
+- Distraction Blocker: Manifest V3 browser extension with dynamic rules to block sites during focus sessions
+- Backend: Supabase SQL schema with RLS for tasks, sessions, settings, and blocklists
+- CI: Basic workflow to validate JSON and shell scripts
+- Docs: Architecture and UX principles
+
+Flutter app scaffolding will be added next (instructions below) so you can run mobile/desktop/web with a single codebase.
+
+## Monorepo structure
+```
+apps/
+  browser_extension/        # MV3 extension (blocking + focus session controls)
+  focus_app/                # Flutter app (to be created)
+backend/
+  supabase/
+    schema.sql              # Database schema + RLS policies
+.github/
+  workflows/ci.yml          # Basic CI checks
+docs/
+  architecture.md
+  ux.md
+```
+
+## Quickstart
+
+### 1) Browser extension (blocker)
+- Load in Chrome/Edge/Brave:
+  1. Open `chrome://extensions`
+  2. Toggle Developer Mode
+  3. Load unpacked -> select `apps/browser_extension`
+- Use the popup to start/stop a focus session and the options page to edit blocklists. Dynamic blocking uses Declarative Net Request rules, applied only while focus mode is on.
+
+### 2) Supabase backend
+- Create a Supabase project (free tier works)
+- In the SQL editor, paste and run `backend/supabase/schema.sql`
+- This creates tables for tasks, focus sessions, user settings, and blocklists with Row Level Security (RLS) policies
+
+Optional local dev:
+- Install Supabase CLI and run a local stack (`supabase start`), then apply `schema.sql`
+
+### 3) Flutter app (to be created)
+Install Flutter: `https://docs.flutter.dev/get-started/install`
+
+Create the app in this monorepo:
+```
+flutter --version
+flutter create --project-name focuskit --org com.focuskit apps/focus_app
+cd apps/focus_app
+flutter run -d chrome   # or -d macos / windows / linux / ios / android
+```
+
+We’ll wire the app to Supabase (auth + sync), implement the Pomodoro, tasks, reports, and a polished UI layer next.
+
+## Roadmap
+- Week 1–2: Flutter core (timer, tasks, clean UI shell), local-first storage, basic reports
+- Week 3–4: Supabase sync, extension integration, break reminders, analytics
+- Week 5–6: Desktop helper (Pro), polish motion/animations, E2E tests, store packaging
+
+## Support & licensing
+- Licensed MIT (see `LICENSE`)
+- Issues and feature requests welcome. SLA-based support plans available.

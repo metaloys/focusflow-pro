@@ -1,0 +1,25 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate JSON (manifest)
+        run: |
+          python -m json.tool apps/browser_extension/manifest.json > /dev/null
+
+      - name: Validate shell scripts
+        run: |
+          bash -n **/*.sh || true
+
+      # Placeholder for Flutter CI (to be enabled once Flutter app is created)
+      # - uses: subosito/flutter-action@v2
+      # - run: flutter --version
+      # - run: flutter analyze
+      # - run: flutter test

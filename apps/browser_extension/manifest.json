@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "FocusKit Blocker",
+  "version": "0.1.0",
+  "description": "Block distracting sites during focus sessions with dynamic rules.",
+  "permissions": [
+    "storage",
+    "declarativeNetRequest",
+    "alarms",
+    "notifications"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "FocusKit",
+    "default_popup": "popup.html"
+  },
+  "options_page": "options.html"
+}
