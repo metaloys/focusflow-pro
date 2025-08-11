@@ -14,6 +14,17 @@ flutter config --no-analytics
 flutter config --enable-web
 
 cd apps/focus_app
+
+# Ensure this is a proper Flutter app scaffold (create missing web folder, etc.)
+if [[ ! -f "pubspec.yaml" ]]; then
+  echo "Missing pubspec.yaml in apps/focus_app" >&2
+  exit 2
+fi
+# Create missing platform folders (web) without touching existing code
+if [[ ! -d "web" ]]; then
+  flutter create --platforms=web .
+fi
+
 flutter pub get
 
 # Optionally inject Supabase env into assets/env.json if provided via env vars
