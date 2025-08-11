@@ -92,7 +92,6 @@ class AppState extends ChangeNotifier {
   bool isAuthenticated = false;
   String? userId;
   RealtimeChannel? _tasksChannel;
-
   // Settings
   int focusMinutes = 25;
   int breakMinutes = 5;
@@ -100,19 +99,19 @@ class AppState extends ChangeNotifier {
   int sessionsBeforeLong = 4;
   bool autoStartNext = true;
   String themeMode = 'system'; // system | light | dark
-
   // Timer
   String currentMode = 'idle'; // idle | focus | break
   DateTime? sessionEnd;
   DateTime? sessionStart;
   int completedFocusCount = 0;
   Timer? _ticker;
-
   // Tasks
   List<TaskItem> tasks = [];
-
   // Stats
   Map<String, DayStat> stats = {}; // yyyy-mm-dd -> stat
+  // Blocklist (default)
+  String? _defaultBlocklistId;
+  List<String> blocklistDomains = [];
 
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
@@ -138,6 +137,8 @@ class AppState extends ChangeNotifier {
     if (isAuthenticated) {
       await loadFromSupabase();
       await _subscribeTasksRealtime();
+      await refreshRemoteStats(days: 7);
+      await loadBlocklistFromSupabase();
     }
     _startTicker();
     notifyListeners();
@@ -314,6 +315,110 @@ class AppState extends ChangeNotifier {
         .toList();
     await save();
     notifyListeners();
+  }
+
+  Future<void> refreshRemoteStats({int days = 7}) async {
+    if (!isAuthenticated) return;
+    final client = Supabase.instance.client;
+    final now = DateTime.now().toUtc();
+    final from = now.subtract(Duration(days: days - 1));
+    final start = DateTime.utc(from.year, from.month, from.day, 0, 0, 0).toIso8601String();
+    // Focus sessions in range
+    final sessions = await client
+        .from('focus_sessions')
+        .select('started_at, ended_at, duration_seconds')
+        .gte('started_at', start);
+    final focusList = (sessions as List<dynamic>).cast<Map<String, dynamic>>();
+    final Map<String, DayStat> agg = {};
+    String keyFor(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+    void addDayStat(String k, {int sessions = 0, int focusSeconds = 0, int tasksDone = 0}) {
+      final prev = agg[k] ?? DayStat(sessions: 0, focusSeconds: 0, tasksDone: 0);
+      agg[k] = prev.copyWith(
+        sessions: prev.sessions + sessions,
+        focusSeconds: prev.focusSeconds + focusSeconds,
+        tasksDone: prev.tasksDone + tasksDone,
+      );
+    }
+    for (final r in focusList) {
+      final ended = (r['ended_at'] as String?) ?? r['started_at'] as String;
+      final endedDt = DateTime.parse(ended).toUtc();
+      final key = keyFor(endedDt);
+      addDayStat(key, sessions: 1, focusSeconds: (r['duration_seconds'] as num?)?.toInt() ?? 0);
+    }
+    // Tasks done in range: count by date(updated_at)
+    final tasksDoneRows = await client
+        .from('tasks')
+        .select('updated_at, status')
+        .gte('updated_at', start)
+        .eq('status', 'done');
+    final tlist = (tasksDoneRows as List<dynamic>).cast<Map<String, dynamic>>();
+    for (final r in tlist) {
+      final upd = DateTime.parse(r['updated_at'] as String).toUtc();
+      final key = keyFor(upd);
+      addDayStat(key, tasksDone: 1);
+    }
+    // Merge into stats map, overriding the fetched days
+    for (int i = 0; i < days; i++) {
+      final d = DateTime(now.year, now.month, now.day - i);
+      final k = keyFor(d);
+      if (agg[k] != null) {
+        final pauses = stats[k]?.pauses; // keep local pauses counts
+        stats[k] = agg[k]!.copyWith(pauses: pauses);
+      }
+    }
+    await save();
+    notifyListeners();
+  }
+
+  // Blocklist sync (default list)
+  Future<void> loadBlocklistFromSupabase() async {
+    if (!isAuthenticated) return;
+    final client = Supabase.instance.client;
+    // Ensure default blocklist exists
+    final bl = await client.from('blocklists').select().eq('is_default', true).maybeSingle();
+    if (bl == null) {
+      final created = await client.from('blocklists').insert({ 'name': 'Default', 'is_default': true }).select().single();
+      _defaultBlocklistId = created['id'] as String?;
+    } else {
+      _defaultBlocklistId = bl['id'] as String?;
+    }
+    if (_defaultBlocklistId == null) return;
+    final items = await client.from('blocklist_items').select().eq('blocklist_id', _defaultBlocklistId);
+    final list = (items as List<dynamic>).cast<Map<String, dynamic>>().map((r) => (r['pattern'] as String?)?.trim() ?? '').where((s) => s.isNotEmpty).toSet().toList();
+    blocklistDomains = list..sort();
+    notifyListeners();
+  }
+
+  Future<void> addBlocklistDomain(String domain) async {
+    final normalized = _normalizeDomain(domain);
+    if (normalized == null) return;
+    if (!blocklistDomains.contains(normalized)) blocklistDomains.add(normalized);
+    blocklistDomains.sort();
+    notifyListeners();
+    if (isAuthenticated && _defaultBlocklistId != null) {
+      try {
+        await Supabase.instance.client.from('blocklist_items').insert({ 'blocklist_id': _defaultBlocklistId, 'pattern': normalized });
+      } catch (_) {}
+    }
+  }
+
+  Future<void> removeBlocklistDomain(String domain) async {
+    blocklistDomains.remove(domain);
+    notifyListeners();
+    if (isAuthenticated && _defaultBlocklistId != null) {
+      try {
+        await Supabase.instance.client.from('blocklist_items').delete().eq('blocklist_id', _defaultBlocklistId).eq('pattern', domain);
+      } catch (_) {}
+    }
+  }
+
+  String? _normalizeDomain(String input) {
+    try {
+      var v = input.trim().toLowerCase();
+      v = v.replaceAll(RegExp(r'^https?://'), '').replaceAll(RegExp(r'^www\.'), '');
+      v = v.split('/')[0].split('?')[0];
+      if (v.isEmpty) return null; return v;
+    } catch (_) { return null; }
   }
 
   Future<void> _subscribeTasksRealtime() async {
@@ -1066,7 +1171,75 @@ class SettingsPage extends StatelessWidget {
           ),
         if (app.supaReady && !app.isAuthenticated)
           const Text('Please sign in to sync (tap back and go to Sign In screen).'),
+        const SizedBox(height: 24),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('Blocklist (Default)', style: TextStyle(fontWeight: FontWeight.w600)),
+            if (app.isAuthenticated)
+              OutlinedButton(onPressed: () => app.loadBlocklistFromSupabase(), child: const Text('Refresh')),
+          ],
+        ),
+        const SizedBox(height: 8),
+        _BlocklistEditor(),
+        const SizedBox(height: 24),
+        const Text('Sync (Supabase)', style: TextStyle(fontWeight: FontWeight.w600)),
+        const SizedBox(height: 8),
+        if (!app.supaReady) const Text('Supabase not configured. Edit assets/env.json'),
+        if (app.supaReady && app.isAuthenticated)
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Signed in as ${app.userId}'),
+              OutlinedButton(onPressed: () => app.signOut(), child: const Text('Sign out')),
+            ],
+          ),
+        if (app.supaReady && !app.isAuthenticated)
+          const Text('Please sign in to sync (tap back and go to Sign In screen).'),
       ],
     );
+  }
+}
+
+class _BlocklistEditor extends StatefulWidget {
+  @override
+  State<_BlocklistEditor> createState() => _BlocklistEditorState();
+}
+
+class _BlocklistEditorState extends State<_BlocklistEditor> {
+  final _controller = TextEditingController();
+  @override
+  Widget build(BuildContext context) {
+    final app = context.watch<AppState>();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _controller,
+                decoration: const InputDecoration(hintText: 'Add domain (e.g., youtube.com)'),
+                onSubmitted: (_) => _add(app),
+              ),
+            ),
+            const SizedBox(width: 8),
+            ElevatedButton(onPressed: () => _add(app), child: const Text('Add')),
+          ],
+        ),
+        const SizedBox(height: 8),
+        ...app.blocklistDomains.map((d) => ListTile(
+              dense: true,
+              title: Text(d),
+              trailing: IconButton(icon: const Icon(Icons.delete_outline), onPressed: () => app.removeBlocklistDomain(d)),
+            )),
+      ],
+    );
+  }
+  Future<void> _add(AppState app) async {
+    final v = _controller.text.trim();
+    if (v.isEmpty) return;
+    await app.addBlocklistDomain(v);
+    _controller.clear();
   }
 }
