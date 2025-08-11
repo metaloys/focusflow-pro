@@ -12,8 +12,15 @@ const STORAGE_KEYS = {
   autoStartNext: 'autoStartNext',
   currentMode: 'currentMode', // 'idle' | 'focus' | 'break'
   sessionEndTs: 'sessionEndTs', // ms epoch
-  sessionCount: 'sessionCount' // completed focus sessions in current cycle
+  sessionStartTs: 'sessionStartTs', // ms epoch
+  sessionCount: 'sessionCount', // completed focus sessions in current cycle
+  stats: 'stats' // { 'YYYY-MM-DD': { sessions: number, focusSeconds: number, tasksDone: number } }
 };
+
+function todayKey() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
 
 function normalizeDomain(input) {
   try {
@@ -34,6 +41,19 @@ async function getStorage(keys) {
 
 async function setStorage(obj) {
   return new Promise((resolve) => chrome.storage.sync.set(obj, resolve));
+}
+
+async function updateTodayStats(delta) {
+  const data = await getStorage([STORAGE_KEYS.stats]);
+  const stats = data[STORAGE_KEYS.stats] || {};
+  const key = todayKey();
+  const day = stats[key] || { sessions: 0, focusSeconds: 0, tasksDone: 0 };
+  stats[key] = {
+    sessions: Math.max(0, (day.sessions || 0) + (delta.sessions || 0)),
+    focusSeconds: Math.max(0, (day.focusSeconds || 0) + (delta.focusSeconds || 0)),
+    tasksDone: Math.max(0, (day.tasksDone || 0) + (delta.tasksDone || 0))
+  };
+  await setStorage({ [STORAGE_KEYS.stats]: stats });
 }
 
 async function getBlocklist() {
@@ -96,18 +116,18 @@ async function updateFocusRules() {
 
 async function startFocusSession(minutes) {
   const durationMinutes = Number(minutes) > 0 ? Number(minutes) : 25;
+  const endTs = Date.now() + durationMinutes * 60 * 1000;
   await setStorage({ [STORAGE_KEYS.sessionMinutes]: durationMinutes });
   await setFocusEnabled(true);
-  await setStorage({ [STORAGE_KEYS.currentMode]: 'focus', [STORAGE_KEYS.sessionEndTs]: Date.now() + durationMinutes * 60 * 1000 });
+  await setStorage({ [STORAGE_KEYS.currentMode]: 'focus', [STORAGE_KEYS.sessionEndTs]: endTs, [STORAGE_KEYS.sessionStartTs]: Date.now() });
   await updateFocusRules();
-  const when = Date.now() + durationMinutes * 60 * 1000;
-  await chrome.alarms.create(ALARM_NAME, { when });
+  await chrome.alarms.create(ALARM_NAME, { when: endTs });
 }
 
 async function stopFocusSession() {
   await chrome.alarms.clear(ALARM_NAME);
   await setFocusEnabled(false);
-  await setStorage({ [STORAGE_KEYS.currentMode]: 'idle', [STORAGE_KEYS.sessionEndTs]: null });
+  await setStorage({ [STORAGE_KEYS.currentMode]: 'idle', [STORAGE_KEYS.sessionEndTs]: null, [STORAGE_KEYS.sessionStartTs]: null });
   await updateFocusRules();
 }
 
@@ -131,7 +151,8 @@ async function ensurePomodoroDefaults() {
     STORAGE_KEYS.sessionsBeforeLong,
     STORAGE_KEYS.autoStartNext,
     STORAGE_KEYS.currentMode,
-    STORAGE_KEYS.sessionCount
+    STORAGE_KEYS.sessionCount,
+    STORAGE_KEYS.stats
   ]);
   const defaults = {};
   if (!data[STORAGE_KEYS.focusMinutes]) defaults[STORAGE_KEYS.focusMinutes] = 25;
@@ -141,6 +162,7 @@ async function ensurePomodoroDefaults() {
   if (typeof data[STORAGE_KEYS.autoStartNext] === 'undefined') defaults[STORAGE_KEYS.autoStartNext] = true;
   if (!data[STORAGE_KEYS.currentMode]) defaults[STORAGE_KEYS.currentMode] = 'idle';
   if (typeof data[STORAGE_KEYS.sessionCount] === 'undefined') defaults[STORAGE_KEYS.sessionCount] = 0;
+  if (!data[STORAGE_KEYS.stats]) defaults[STORAGE_KEYS.stats] = {};
   if (Object.keys(defaults).length > 0) await setStorage(defaults);
 }
 
@@ -154,15 +176,14 @@ async function startPomodoroCycle(settings) {
   if (typeof settings?.autoStartNext === 'boolean') toSet[STORAGE_KEYS.autoStartNext] = settings.autoStartNext;
   if (Object.keys(toSet).length > 0) await setStorage(toSet);
   const data = await getStorage([
-    STORAGE_KEYS.focusMinutes,
-    STORAGE_KEYS.sessionCount
+    STORAGE_KEYS.focusMinutes
   ]);
   await startMode('focus', Number(data[STORAGE_KEYS.focusMinutes]) || 25);
 }
 
 async function stopPomodoroCycle() {
   await chrome.alarms.clear(ALARM_NAME);
-  await setStorage({ [STORAGE_KEYS.currentMode]: 'idle', [STORAGE_KEYS.sessionEndTs]: null, [STORAGE_KEYS.sessionCount]: 0 });
+  await setStorage({ [STORAGE_KEYS.currentMode]: 'idle', [STORAGE_KEYS.sessionEndTs]: null, [STORAGE_KEYS.sessionStartTs]: null, [STORAGE_KEYS.sessionCount]: 0 });
   await setFocusEnabled(false);
   await updateFocusRules();
 }
@@ -170,7 +191,7 @@ async function stopPomodoroCycle() {
 async function startMode(mode, minutes) {
   const duration = Number(minutes) > 0 ? Number(minutes) : 25;
   const endTs = Date.now() + duration * 60 * 1000;
-  await setStorage({ [STORAGE_KEYS.currentMode]: mode, [STORAGE_KEYS.sessionEndTs]: endTs });
+  await setStorage({ [STORAGE_KEYS.currentMode]: mode, [STORAGE_KEYS.sessionEndTs]: endTs, [STORAGE_KEYS.sessionStartTs]: mode === 'focus' ? Date.now() : null });
   await chrome.alarms.clear(ALARM_NAME);
   await chrome.alarms.create(ALARM_NAME, { when: endTs });
   if (mode === 'focus') {
@@ -212,14 +233,21 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     STORAGE_KEYS.longBreakMinutes,
     STORAGE_KEYS.sessionsBeforeLong,
     STORAGE_KEYS.sessionCount,
-    STORAGE_KEYS.autoStartNext
+    STORAGE_KEYS.autoStartNext,
+    STORAGE_KEYS.sessionStartTs,
+    STORAGE_KEYS.sessionEndTs
   ]);
   const mode = data[STORAGE_KEYS.currentMode] || 'idle';
   const autoNext = Boolean(data[STORAGE_KEYS.autoStartNext]);
   if (mode === 'focus') {
-    // Focus done
+    // Record stats for completed focus
+    const startTs = Number(data[STORAGE_KEYS.sessionStartTs] || 0);
+    const endTs = Number(data[STORAGE_KEYS.sessionEndTs] || Date.now());
+    const deltaSeconds = startTs && endTs ? Math.max(0, Math.floor((endTs - startTs) / 1000)) : Math.floor((Number(data[STORAGE_KEYS.focusMinutes] || 25)) * 60);
+    await updateTodayStats({ sessions: 1, focusSeconds: deltaSeconds });
+
     const newCount = Number(data[STORAGE_KEYS.sessionCount] || 0) + 1;
-    await setStorage({ [STORAGE_KEYS.sessionCount]: newCount });
+    await setStorage({ [STORAGE_KEYS.sessionCount]: newCount, [STORAGE_KEYS.sessionStartTs]: null });
     try {
       await chrome.notifications.create({
         type: 'basic',
@@ -268,7 +296,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         STORAGE_KEYS.breakMinutes,
         STORAGE_KEYS.longBreakMinutes,
         STORAGE_KEYS.sessionsBeforeLong,
-        STORAGE_KEYS.autoStartNext
+        STORAGE_KEYS.autoStartNext,
+        STORAGE_KEYS.stats
       ]);
       sendResponse({
         focusEnabled: Boolean(data[STORAGE_KEYS.focusEnabled]),
@@ -281,7 +310,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           longBreakMinutes: data[STORAGE_KEYS.longBreakMinutes] || 15,
           sessionsBeforeLong: data[STORAGE_KEYS.sessionsBeforeLong] || 4,
           autoStartNext: Boolean(data[STORAGE_KEYS.autoStartNext])
-        }
+        },
+        stats: data[STORAGE_KEYS.stats] || {}
       });
       return;
     }
@@ -302,6 +332,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     if (message && message.type === 'stopPomodoro') {
       await stopPomodoroCycle();
+      sendResponse({ ok: true });
+      return;
+    }
+    if (message && message.type === 'stats:addTasksDone') {
+      // Adjust tasks done counter for today by +delta
+      const delta = Number(message.delta || 0);
+      if (delta !== 0) await updateTodayStats({ tasksDone: delta });
       sendResponse({ ok: true });
       return;
     }

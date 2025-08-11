@@ -17,6 +17,8 @@ const taskInputEl = document.getElementById('task-input');
 const taskPriorityEl = document.getElementById('task-priority');
 const taskAddBtn = document.getElementById('task-add');
 
+const reportsEl = document.getElementById('reports');
+
 function sendMessage(message) {
   return new Promise((resolve) => chrome.runtime.sendMessage(message, resolve));
 }
@@ -59,9 +61,7 @@ async function loadTasks() {
   const data = await getStorage([TASKS_KEY]);
   const all = Array.isArray(data[TASKS_KEY]) ? data[TASKS_KEY] : [];
   const today = todayKey();
-  // Filter tasks for today; keep others but we only render today
   const todays = all.filter(t => t.date === today);
-  // Sort by done then order
   todays.sort((a,b) => (a.done === b.done ? a.order - b.order : (a.done ? 1 : -1)));
   return { all, todays };
 }
@@ -77,7 +77,7 @@ function prioDotClass(p) {
 async function renderTasks() {
   const { all, todays } = await loadTasks();
   tasksEl.innerHTML = '';
-  todays.forEach((task, index) => {
+  todays.forEach((task) => {
     const row = document.createElement('div');
     row.className = 'task-row';
     row.draggable = true;
@@ -94,8 +94,13 @@ async function renderTasks() {
     checkbox.addEventListener('change', async () => {
       const idx = all.findIndex(t => t.id === task.id);
       if (idx >= 0) {
-        all[idx].done = checkbox.checked;
+        const wasDone = !!all[idx].done;
+        const nowDone = !!checkbox.checked;
+        all[idx].done = nowDone;
         await saveTasks(all);
+        // Update stats if state changed
+        if (nowDone && !wasDone) await sendMessage({ type: 'stats:addTasksDone', delta: 1 });
+        if (!nowDone && wasDone) await sendMessage({ type: 'stats:addTasksDone', delta: -1 });
         await renderTasks();
       }
     });
@@ -135,8 +140,10 @@ async function renderTasks() {
     delBtn.addEventListener('click', async () => {
       const idx = all.findIndex(t => t.id === task.id);
       if (idx >= 0) {
+        const wasDone = !!all[idx].done;
         all.splice(idx,1);
         await saveTasks(all);
+        if (wasDone) await sendMessage({ type: 'stats:addTasksDone', delta: -1 });
         await renderTasks();
       }
     });
@@ -160,17 +167,13 @@ async function renderTasks() {
       const draggedId = e.dataTransfer.getData('text/plain');
       if (!draggedId || draggedId === task.id) return;
       const today = todayKey();
-      const todayTasks = all.filter(t => t.date === today);
+      const { all: allTasks } = await loadTasks();
+      const todayTasks = allTasks.filter(t => t.date === today);
       const dragged = todayTasks.find(t => t.id === draggedId);
       const target = todayTasks.find(t => t.id === task.id);
       if (!dragged || !target) return;
-      // Compute new order by swapping order values
-      const draggedIndex = todayTasks.findIndex(t => t.id === draggedId);
-      const targetIndex = todayTasks.findIndex(t => t.id === task.id);
-      const temp = dragged.order;
-      dragged.order = target.order;
-      target.order = temp;
-      await saveTasks(all);
+      const temp = dragged.order; dragged.order = target.order; target.order = temp;
+      await saveTasks(allTasks);
       await renderTasks();
     });
 
@@ -197,6 +200,45 @@ async function refreshStatus() {
   if (endTs) remaining = formatRemaining(endTs - Date.now());
   pModeEl.textContent = mode;
   pRemainingEl.textContent = remaining;
+
+  // Reports
+  renderReports(res.stats || {});
+}
+
+function formatDateLabel(dateStr) {
+  const [y,m,d] = dateStr.split('-').map(Number);
+  const dt = new Date(y, m-1, d);
+  return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function formatMinutes(minutes) {
+  if (minutes < 60) return `${minutes}m`;
+  const h = Math.floor(minutes / 60);
+  const m = Math.floor(minutes % 60);
+  return m ? `${h}h ${m}m` : `${h}h`;
+}
+
+function renderReports(stats) {
+  reportsEl.innerHTML = '';
+  // Build a 7-day window ending today
+  const days = [];
+  const now = new Date();
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+    const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    const day = stats[key] || { sessions: 0, focusSeconds: 0, tasksDone: 0 };
+    days.push({ key, ...day });
+  }
+  days.forEach((day) => {
+    const row = document.createElement('div');
+    row.className = 'report-row';
+    const d = document.createElement('div'); d.textContent = formatDateLabel(day.key);
+    const focus = document.createElement('div'); focus.textContent = formatMinutes(Math.floor((day.focusSeconds||0)/60));
+    const sessions = document.createElement('div'); sessions.textContent = String(day.sessions||0);
+    const tasks = document.createElement('div'); tasks.textContent = String(day.tasksDone||0);
+    row.appendChild(d); row.appendChild(focus); row.appendChild(sessions); row.appendChild(tasks);
+    reportsEl.appendChild(row);
+  });
 }
 
 let intervalId = null;

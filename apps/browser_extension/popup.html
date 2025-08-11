@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>FocusKit</title>
     <style>
-      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 12px; min-width: 320px; }
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 12px; min-width: 360px; }
       h1 { font-size: 16px; margin: 0 0 8px; }
       h2 { font-size: 13px; margin: 14px 0 6px; color: #555; }
       .row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
@@ -33,6 +33,9 @@
       .dot.high { background: #f59e0b; }
       .dot.urgent { background: #ef4444; }
       .task-actions button { padding: 6px 8px; font-size: 12px; }
+      /* Reports */
+      .report-row { display: grid; grid-template-columns: 86px 1fr 1fr 1fr; gap: 8px; font-size: 12px; padding: 4px 0; border-bottom: 1px dashed #eee; }
+      .report-header { color: #666; font-weight: 600; }
     </style>
   </head>
   <body>
@@ -77,6 +80,15 @@
       <button id="task-add">Add</button>
     </div>
     <div class="tasks" id="tasks"></div>
+
+    <h2>Reports (7 days)</h2>
+    <div class="report-row report-header">
+      <div>Date</div>
+      <div>Focus</div>
+      <div>Sessions</div>
+      <div>Tasks</div>
+    </div>
+    <div id="reports"></div>
 
     <div class="row" style="justify-content: space-between; margin-top: 8px;">
       <a href="options.html" target="_blank">Edit blocklist</a>
