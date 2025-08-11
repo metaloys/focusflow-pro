@@ -1,5 +1,5 @@
 [build]
-  command = "npx create-react-app . --use-npm && npm run build"
+  command = "npm install && npm run build"
   publish = "build"
 
 [[redirects]]
