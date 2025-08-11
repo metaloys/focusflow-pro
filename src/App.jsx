@@ -1417,7 +1417,7 @@ const App = () => {
       {/* Footer */}
       <footer className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 text-center text-sm text-slate-500 dark:text-slate-400">
         <p>FocusFlow Pro • Premium productivity for remote professionals • Your data is private and secure</p>
-        <p className="mt-1">© 2025 FocusFlow. All rights reserved. Made with ❤️ for remote workers.</p>
+        <p className="mt-1">© 2024 FocusFlow. All rights reserved. Made with ❤️ for remote workers.</p>
       </footer>
     </div>
   );
