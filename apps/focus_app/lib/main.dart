@@ -91,6 +91,7 @@ class AppState extends ChangeNotifier {
   bool supaReady = false;
   bool isAuthenticated = false;
   String? userId;
+  RealtimeChannel? _tasksChannel;
 
   // Settings
   int focusMinutes = 25;
@@ -136,6 +137,7 @@ class AppState extends ChangeNotifier {
     await _refreshAuthState();
     if (isAuthenticated) {
       await loadFromSupabase();
+      await _subscribeTasksRealtime();
     }
     _startTicker();
     notifyListeners();
@@ -220,9 +222,28 @@ class AppState extends ChangeNotifier {
 
   Future<void> signOut() async {
     if (!supaReady) return;
+    await _unsubscribeRealtime();
     await Supabase.instance.client.auth.signOut();
     await _refreshAuthState();
     notifyListeners();
+  }
+
+  Future<bool> signUpWithPassword(String email, String password) async {
+    if (!supaReady) return false;
+    final res = await Supabase.instance.client.auth.signUp(email: email, password: password);
+    await _refreshAuthState();
+    if (isAuthenticated) {
+      await loadFromSupabase();
+      await _subscribeTasksRealtime();
+    }
+    notifyListeners();
+    // If email confirmation is required, session may be null
+    return res.user != null;
+  }
+
+  Future<void> resetPassword(String email, {String? redirectTo}) async {
+    if (!supaReady) return;
+    await Supabase.instance.client.auth.resetPasswordForEmail(email, redirectTo: redirectTo);
   }
 
   // Remote mapping helpers
@@ -277,7 +298,7 @@ class AppState extends ChangeNotifier {
         .select()
         .gte('due_date', start)
         .lte('due_date', end)
-        .order('created_at');
+        .order('updated_at');
     final remoteTasks = (rows as List<dynamic>).cast<Map<String, dynamic>>();
     tasks = remoteTasks
         .map((r) => TaskItem(
@@ -288,9 +309,73 @@ class AppState extends ChangeNotifier {
               order: (r['updated_at'] != null ? DateTime.parse(r['updated_at']).millisecondsSinceEpoch : DateTime.now().millisecondsSinceEpoch),
               createdAt: (r['created_at'] != null ? DateTime.parse(r['created_at']).millisecondsSinceEpoch : DateTime.now().millisecondsSinceEpoch),
               date: _dueDateToDateString(r['due_date'] as String?),
+              updatedAtMs: (r['updated_at'] != null ? DateTime.parse(r['updated_at']).millisecondsSinceEpoch : DateTime.now().millisecondsSinceEpoch),
             ))
         .toList();
     await save();
+    notifyListeners();
+  }
+
+  Future<void> _subscribeTasksRealtime() async {
+    await _unsubscribeRealtime();
+    if (!isAuthenticated) return;
+    final uid = userId;
+    if (uid == null) return;
+    _tasksChannel = Supabase.instance.client.channel('public:tasks')
+      ..on(
+        RealtimeListenTypes.postgresChanges,
+        ChannelFilter(event: '*', schema: 'public', table: 'tasks', filter: 'user_id=eq.$uid'),
+        (payload, [ref]) async {
+          final row = payload['new'] ?? payload['old'] ?? {};
+          final String eventType = payload['eventType'] as String? ?? '';
+          _applyRemoteTaskChange(eventType: eventType, row: Map<String, dynamic>.from(row));
+        },
+      )
+      ..subscribe();
+  }
+
+  Future<void> _unsubscribeRealtime() async {
+    if (_tasksChannel != null) {
+      await Supabase.instance.client.removeChannel(_tasksChannel!);
+      _tasksChannel = null;
+    }
+  }
+
+  void _applyRemoteTaskChange({required String eventType, required Map<String, dynamic> row}) {
+    // Only handle today's tasks
+    final dateStr = _dueDateToDateString(row['due_date'] as String?);
+    if (dateStr != todayKey()) return;
+    final id = row['id'] as String?;
+    if (id == null) return;
+    final remoteUpdated = (row['updated_at'] != null ? DateTime.parse(row['updated_at']).millisecondsSinceEpoch : 0);
+    final idx = tasks.indexWhere((t) => t.id == id);
+    if (eventType == 'DELETE') {
+      if (idx >= 0) {
+        tasks.removeAt(idx);
+        save();
+        notifyListeners();
+      }
+      return;
+    }
+    final incoming = TaskItem(
+      id: id,
+      title: (row['title'] as String?) ?? '',
+      priority: _intToPriority((row['priority'] as num?)?.toInt() ?? 3),
+      done: ((row['status'] as String?) ?? 'todo') == 'done',
+      order: remoteUpdated,
+      createdAt: (row['created_at'] != null ? DateTime.parse(row['created_at']).millisecondsSinceEpoch : DateTime.now().millisecondsSinceEpoch),
+      date: dateStr,
+      updatedAtMs: remoteUpdated,
+    );
+    if (idx == -1) {
+      tasks = [...tasks, incoming];
+    } else {
+      // Conflict resolution: take the more recent updatedAt
+      if ((tasks[idx].updatedAtMs ?? 0) <= remoteUpdated) {
+        tasks[idx] = incoming;
+      }
+    }
+    save();
     notifyListeners();
   }
 
@@ -412,7 +497,7 @@ class AppState extends ChangeNotifier {
     final idx = tasks.indexWhere((t) => t.id == task.id);
     if (idx == -1) return;
     final prev = tasks[idx].done;
-    tasks[idx] = tasks[idx].copyWith(done: !prev);
+    tasks[idx] = tasks[idx].copyWith(done: !prev, updatedAtMs: DateTime.now().millisecondsSinceEpoch);
     if (!prev) _addStat(tasksDone: 1); else _addStat(tasksDone: -1);
     if (isAuthenticated) {
       try {
@@ -435,6 +520,7 @@ class AppState extends ChangeNotifier {
       order: DateTime.now().millisecondsSinceEpoch,
       createdAt: DateTime.now().millisecondsSinceEpoch,
       date: todayKey(),
+      updatedAtMs: DateTime.now().millisecondsSinceEpoch,
     );
     TaskItem toInsert = local;
     if (isAuthenticated) {
@@ -445,8 +531,9 @@ class AppState extends ChangeNotifier {
           'priority': _priorityToInt(local.priority),
           'status': 'todo',
           'due_date': _dateStringToDueDate(local.date).toIso8601String(),
+          'updated_at': DateTime.now().toIso8601String(),
         }).select().single();
-        toInsert = local.copyWith(id: row['id'] as String);
+        toInsert = local.copyWith(id: row['id'] as String, updatedAtMs: DateTime.parse(row['updated_at']).millisecondsSinceEpoch);
       } catch (_) {}
     }
     tasks = [...tasks, toInsert];
@@ -471,9 +558,9 @@ class AppState extends ChangeNotifier {
     if (newIndex > oldIndex) newIndex -= 1;
     final item = tasks.removeAt(oldIndex);
     tasks.insert(newIndex, item);
-    // Reassign order values
+    // Reassign order values locally
     for (int i = 0; i < tasks.length; i++) {
-      tasks[i] = tasks[i].copyWith(order: i);
+      tasks[i] = tasks[i].copyWith(order: i, updatedAtMs: DateTime.now().millisecondsSinceEpoch);
     }
     await save();
     notifyListeners();
@@ -489,8 +576,11 @@ class AuthPage extends StatefulWidget {
 class _AuthPageState extends State<AuthPage> {
   final _email = TextEditingController();
   final _password = TextEditingController();
+  final _resetEmail = TextEditingController();
   bool _loading = false;
   String? _error;
+  bool _isSignup = false;
+  String? _info;
 
   @override
   Widget build(BuildContext context) {
@@ -502,37 +592,76 @@ class _AuthPageState extends State<AuthPage> {
           child: Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 420),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text('FocusKit', style: Theme.of(context).textTheme.headlineMedium),
-                  const SizedBox(height: 16),
-                  if (!app.supaReady)
-                    const Text('Supabase not configured. Edit assets/env.json.', textAlign: TextAlign.center),
-                  if (app.supaReady) ...[
-                    TextField(controller: _email, decoration: const InputDecoration(labelText: 'Email')),
-                    const SizedBox(height: 12),
-                    TextField(controller: _password, decoration: const InputDecoration(labelText: 'Password'), obscureText: true),
-                    const SizedBox(height: 12),
-                    if (_error != null) Text(_error!, style: const TextStyle(color: Colors.red)),
-                    const SizedBox(height: 8),
-                    ElevatedButton(
-                      onPressed: _loading ? null : () async {
-                        setState(() { _loading = true; _error = null; });
-                        try {
-                          final ok = await context.read<AppState>().signInWithPassword(_email.text.trim(), _password.text);
-                          if (!ok) setState(() { _error = 'Sign-in failed'; });
-                        } catch (e) {
-                          setState(() { _error = '$e'; });
-                        } finally {
-                          if (mounted) setState(() { _loading = false; });
-                        }
-                      },
-                      child: _loading ? const CircularProgressIndicator() : const Text('Sign in'),
-                    ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text('FocusKit', style: Theme.of(context).textTheme.headlineMedium, textAlign: TextAlign.center),
+                    const SizedBox(height: 16),
+                    if (!app.supaReady)
+                      const Text('Supabase not configured. Edit assets/env.json.', textAlign: TextAlign.center),
+                    if (app.supaReady) ...[
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          ChoiceChip(label: const Text('Sign in'), selected: !_isSignup, onSelected: (_) => setState(() => _isSignup = false)),
+                          const SizedBox(width: 8),
+                          ChoiceChip(label: const Text('Sign up'), selected: _isSignup, onSelected: (_) => setState(() => _isSignup = true)),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(controller: _email, decoration: const InputDecoration(labelText: 'Email')),
+                      const SizedBox(height: 12),
+                      TextField(controller: _password, decoration: const InputDecoration(labelText: 'Password'), obscureText: true),
+                      const SizedBox(height: 12),
+                      if (_error != null) Text(_error!, style: const TextStyle(color: Colors.red)),
+                      if (_info != null) Text(_info!, style: const TextStyle(color: Colors.green)),
+                      const SizedBox(height: 8),
+                      ElevatedButton(
+                        onPressed: _loading ? null : () async {
+                          setState(() { _loading = true; _error = null; _info = null; });
+                          try {
+                            bool ok = false;
+                            if (_isSignup) {
+                              ok = await context.read<AppState>().signUpWithPassword(_email.text.trim(), _password.text);
+                              if (!ok) {
+                                _info = 'Check your inbox to confirm your email.';
+                              }
+                            } else {
+                              ok = await context.read<AppState>().signInWithPassword(_email.text.trim(), _password.text);
+                            }
+                            if (!ok && !_isSignup) setState(() { _error = 'Sign-in failed'; });
+                          } catch (e) {
+                            setState(() { _error = '$e'; });
+                          } finally {
+                            if (mounted) setState(() { _loading = false; });
+                          }
+                        },
+                        child: _loading ? const CircularProgressIndicator() : Text(_isSignup ? 'Create account' : 'Sign in'),
+                      ),
+                      const SizedBox(height: 16),
+                      const Divider(),
+                      const SizedBox(height: 8),
+                      Text('Forgot password?', style: Theme.of(context).textTheme.titleSmall),
+                      const SizedBox(height: 8),
+                      TextField(controller: _resetEmail, decoration: const InputDecoration(labelText: 'Email for reset')),
+                      const SizedBox(height: 8),
+                      OutlinedButton(
+                        onPressed: () async {
+                          setState(() { _error = null; _info = null; });
+                          try {
+                            await context.read<AppState>().resetPassword(_resetEmail.text.trim());
+                            setState(() { _info = 'Reset email sent (if the address exists).'; });
+                          } catch (e) {
+                            setState(() { _error = '$e'; });
+                          }
+                        },
+                        child: const Text('Send reset email'),
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
           ),
@@ -550,6 +679,7 @@ class TaskItem {
   final int order;
   final int createdAt;
   final String date; // yyyy-mm-dd
+  final int? updatedAtMs;
 
   TaskItem({
     required this.id,
@@ -559,6 +689,7 @@ class TaskItem {
     required this.order,
     required this.createdAt,
     required this.date,
+    this.updatedAtMs,
   });
 
   TaskItem copyWith({
@@ -569,6 +700,7 @@ class TaskItem {
     int? order,
     int? createdAt,
     String? date,
+    int? updatedAtMs,
   }) {
     return TaskItem(
       id: id ?? this.id,
@@ -578,6 +710,7 @@ class TaskItem {
       order: order ?? this.order,
       createdAt: createdAt ?? this.createdAt,
       date: date ?? this.date,
+      updatedAtMs: updatedAtMs ?? this.updatedAtMs,
     );
   }
 
@@ -589,6 +722,7 @@ class TaskItem {
         'order': order,
         'createdAt': createdAt,
         'date': date,
+        'updatedAtMs': updatedAtMs,
       };
 
   static TaskItem fromJson(Map<String, dynamic> json) => TaskItem(
@@ -599,6 +733,7 @@ class TaskItem {
         order: json['order'] as int,
         createdAt: json['createdAt'] as int,
         date: json['date'] as String,
+        updatedAtMs: (json['updatedAtMs'] as num?)?.toInt(),
       );
 }
 
