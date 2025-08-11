@@ -5,11 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>FocusKit</title>
     <style>
-      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 12px; min-width: 280px; }
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 12px; min-width: 320px; }
       h1 { font-size: 16px; margin: 0 0 8px; }
       h2 { font-size: 13px; margin: 14px 0 6px; color: #555; }
       .row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
       input[type=number] { width: 70px; padding: 6px; }
+      input[type=text] { flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 8px; }
+      select { padding: 8px; border-radius: 8px; border: 1px solid #ddd; }
       input[type=checkbox] { transform: scale(1.2); }
       button { padding: 8px 12px; border-radius: 8px; border: 1px solid #ccc; background: #111; color: #fff; cursor: pointer; }
       button.secondary { background: #f5f5f5; color: #111; }
@@ -18,6 +20,19 @@
       a { font-size: 12px; color: #2563eb; text-decoration: none; }
       .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
       label small { color: #666; }
+      /* Tasks */
+      .tasks { margin-top: 8px; }
+      .task-row { display: grid; grid-template-columns: 18px 1fr auto auto; gap: 8px; align-items: center; border: 1px solid #eee; border-radius: 8px; padding: 6px 8px; margin-bottom: 6px; background: #fff; }
+      .task-title { font-size: 13px; }
+      .task-title.done { text-decoration: line-through; color: #888; }
+      .drag { cursor: grab; color: #888; padding: 0 4px; user-select: none; }
+      .prio { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #555; }
+      .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+      .dot.low { background: #10b981; }
+      .dot.normal { background: #3b82f6; }
+      .dot.high { background: #f59e0b; }
+      .dot.urgent { background: #ef4444; }
+      .task-actions button { padding: 6px 8px; font-size: 12px; }
     </style>
   </head>
   <body>
@@ -48,7 +63,20 @@
       <button id="p-start">Start Cycle</button>
       <button id="p-stop" class="secondary">Stop</button>
     </div>
-    <div class="status" id="p-status">Mode: idle • <span class="countdown" id="p-remaining">--:--</span></div>
+    <div class="status">Mode: <span id="p-mode">idle</span> • <span class="countdown" id="p-remaining">--:--</span></div>
+
+    <h2>Daily tasks</h2>
+    <div class="row">
+      <input id="task-input" type="text" placeholder="Add a task…" />
+      <select id="task-priority">
+        <option value="normal">Normal</option>
+        <option value="low">Low</option>
+        <option value="high">High</option>
+        <option value="urgent">Urgent</option>
+      </select>
+      <button id="task-add">Add</button>
+    </div>
+    <div class="tasks" id="tasks"></div>
 
     <div class="row" style="justify-content: space-between; margin-top: 8px;">
       <a href="options.html" target="_blank">Edit blocklist</a>
